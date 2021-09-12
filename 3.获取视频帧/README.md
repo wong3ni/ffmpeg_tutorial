@@ -7,10 +7,12 @@
 #include "libavformat/avformat.h"
 #include <stdio.h>
 
+static void decoded(AVCodecContext *avcc, AVFrame *frame, AVPacket *packet);
+
 int main()
 {
     const char *filename = "SampleVideo.mp4";
-  	// 分配一个avformat context
+    // 分配一个avformat context
     AVFormatContext *avformat_ctx = avformat_alloc_context();
     if (avformat_ctx == NULL)
     {
@@ -58,7 +60,7 @@ int main()
             break;
         }
     }
-		
+
     codec = avcodec_find_decoder(codec_parameters->codec_id);
     codec_context = avcodec_alloc_context3(codec);
     avcodec_parameters_to_context(codec_context, codec_parameters);
@@ -68,46 +70,54 @@ int main()
 
     AVPacket *packet = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
-		
-  	// av_read_frame读取每一帧压缩数据
+
+    // av_read_frame读取每一帧压缩数据
     while (av_read_frame(avformat_ctx, packet) >= 0)
     {
-      	// 如果是视频数据
+        // 如果是视频数据
         if (packet->stream_index == video_index)
         {
-          	// 送入进行解码
-            int ret = avcodec_send_packet(codec_context, packet);
-            if (ret < 0)
-            {
-                printf("解码数据包失败\n");
-                return -1;
-            }
-            while (ret >= 0)
-            {
-              	// 读取解码后的数据，即frame存放原始数据
-                ret = avcodec_receive_frame(codec_context, frame);
-                if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-                    continue;
-                else if (ret < 0)
-                {
-                    printf("解码数据时出错\n");
-                    return -1;
-                }
-                printf("解码第%d帧\n", codec_context->frame_number);
-            }
+          	// 解码数据
+            decoded(codec_context, frame, packet);
         }
-      	// 释放引用的数据，重用frame和packet
+        // 释放引用的数据，重用frame和packet
         av_frame_unref(frame);
         av_packet_unref(packet);
     }
-	
-  	// 内存释放
+
+    // 输出缓存的数据
+    decoded(codec_context, frame, NULL);
+
+    // 内存释放
     av_frame_free(&frame);
     av_packet_free(&packet);
-    avcodec_free_context(&codec_context);
     avformat_free_context(avformat_ctx);
 
     return 0;
+}
+
+static void decoded(AVCodecContext *avcc, AVFrame *frame, AVPacket *packet)
+{
+    // 送入进行解码
+    int ret = avcodec_send_packet(avcc, packet);
+    if (ret < 0)
+    {
+        printf("解码数据包失败\n");
+        exit(-1);
+    }
+    while (ret >= 0)
+    {
+        // 读取解码后的数据，即frame存放原始数据
+        ret = avcodec_receive_frame(avcc, frame);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+            return;
+        else if (ret < 0)
+        {
+            printf("解码数据时出错\n");
+            exit(-1);
+        }
+        printf("解码第%d帧\n", avcc->frame_number);
+    }
 }
 
 ```
@@ -128,7 +138,7 @@ int main()
 
 4. 获取有关编解码的参数。
 
-```c++
+```c
 // nb_streams存放了流的数量，大部分情况下是2，一个是视频流，另一个是音频流
 for (uint32_t i = 0; i < avformat_ctx->nb_streams; i++)
 {
@@ -165,47 +175,32 @@ avcodec_parameters_to_context(codec_context, codec_parameters);
 
 7. 循环读取数据，获取其中的帧数据并进行解码操作。
 
-```c++
-// av_read_frame读取每一帧压缩数据到packet中
+```c
+// av_read_frame读取每一帧压缩数据
 while (av_read_frame(avformat_ctx, packet) >= 0)
 {
     // 如果是视频数据
     if (packet->stream_index == video_index)
     {
-        // 将packet送入进行解码
-        int ret = avcodec_send_packet(codec_context, packet);
-        if (ret < 0)
-        {
-            printf("解码数据包失败\n");
-            return -1;
-        }
-      	// 不使用循环可能会造成内存泄漏
-        while (ret >= 0)
-        {
-            // 读取解码后的数据，即frame存放原始数据
-            ret = avcodec_receive_frame(codec_context, frame);
-            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-              continue;
-            else if (ret < 0)
-            {
-              printf("解码数据时出错\n");
-              return -1;
-            }
-            printf("解码第%d帧\n", codec_context->frame_number);
-        }
+        // 解码数据
+        decoded(codec_context, frame, packet);
     }
-    // 释放引用的数据，重用frame和packet。此操作并不会释放frame和packet结构，只释放它们引用的数据
+    // 释放引用的数据，重用frame和packet
     av_frame_unref(frame);
     av_packet_unref(packet);
 }
 ```
+
+8. 输出剩下的数据。
+
+   `decoded(codec_context, frame, NULL)`。传一个空`packet`过去。
 
 ## AVPacket结构体
 
 这里只简单介绍几个基本的参数
 
 
-```c++
+```c
 typedef struct AVPacket {
 		// 显示时间戳
 		int64_t pts;
@@ -221,7 +216,7 @@ typedef struct AVPacket {
 
 ## AVFrame结构体
 
-```c++
+```c
 typedef struct AVFrame {
   	// 原始数据的指针，即解码后的数据，对于rgb类的数据而言data[0]就是指向的原始数据，对于yuv类的数据而言data[0],data[1],data[2]分别指向y,u,v三个分量的数据，AV_NUM_DATA_POINTERS为8
   	uint8_t *data[AV_NUM_DATA_POINTERS];

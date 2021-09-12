@@ -4,10 +4,12 @@
 
 本例子从mp4文件中提取h264流并写入文件中(**不包含音频部分**)，可以使用`ffplay`直接进行播放(`ffplay -f h264 video.h264`)，代码如下。
 
-```c++
+```c
 #include "libavcodec/avcodec.h"
 #include "libavformat/avformat.h"
 #include <stdio.h>
+
+static void decoded(AVBSFContext *h264bsfc, AVPacket *packet);
 
 int main()
 {
@@ -66,43 +68,55 @@ int main()
     {
         if (packet->stream_index == video_index)
         {
-            // 发送packet让你添加额外信息
-            int ret = av_bsf_send_packet(h264bsfc, packet);
-            if (ret < 0)
-            {
-                printf("av_bsf_send_packet失败\n");
-                return -1;
-            }
-            while (ret >= 0)
-            {
-                // 接收已经添加好的packet
-                ret = av_bsf_receive_packet(h264bsfc, packet);
-                if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-                    continue;
-                else if (ret < 0)
-                {
-                    return -1;
-                }
-            }
+            decoded(h264bsfc, packet);
             // 写入到文件中
-            fwrite(packet->data, packet->size, 1, fp);
+            if (packet->size)
+            {
+                fwrite(packet->data, packet->size, 1, fp);
+            }
         }
         av_packet_unref(packet);
     }
 
-    fclose(fp);
+    decoded(h264bsfc, NULL);
+    if (packet->size)
+    {
+        fwrite(packet->data, packet->size, 1, fp);
+    }
 
+    fclose(fp);
     av_packet_free(&packet);
     avformat_free_context(avformat_ctx);
 
     return 0;
 }
 
+static void decoded(AVBSFContext *h264bsfc, AVPacket *packet)
+{
+    // 发送packet让你添加额外信息
+    int ret = av_bsf_send_packet(h264bsfc, packet);
+    if (ret < 0)
+    {
+        printf("av_bsf_send_packet失败\n");
+        exit(-1);
+    }
+    while (ret >= 0)
+    {
+        // 接收已经添加好的packet
+        ret = av_bsf_receive_packet(h264bsfc, packet);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+            return;
+        else if (ret < 0)
+        {
+            exit(-1);
+        }
+    }
+}
 ```
 
 ## 关键代码
 
-```c++
+```c
 ...
 const AVBitStreamFilter *h264_stream_filter = av_bsf_get_by_name("h264_mp4toannexb");
 if (h264_stream_filter == NULL)
@@ -115,21 +129,28 @@ av_bsf_alloc(h264_stream_filter, &h264bsfc);
 h264bsfc->par_in = codec_parameters;
 av_bsf_init(h264bsfc);
 ...
-while()
+
+static void decoded(AVBSFContext *h264bsfc, AVPacket *packet)
 {
-  	...
-    av_bsf_send_packet(h264bsfc, packet);
-  	...
-    while()
+    // 发送packet让你添加额外信息
+    int ret = av_bsf_send_packet(h264bsfc, packet);
+    if (ret < 0)
     {
-      	...
-      	av_bsf_receive_packet(h264bsfc, packet);
-      	...
+        printf("av_bsf_send_packet失败\n");
+        exit(-1);
     }
-	  fwrite(packet->data,...);
-	  ...
+    while (ret >= 0)
+    {
+        // 接收已经添加好的packet
+        ret = av_bsf_receive_packet(h264bsfc, packet);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+            return;
+        else if (ret < 0)
+        {
+            exit(-1);
+        }
+    }
 }
-...
 ```
 
 现在网上大部分代码都是很老的版本使用方法了，比如使用`av_bitstream_filter_init`或`av_bitstream_filter_filter`之类的函数，这些函数已经被标记废弃，所以不再使用这类函数。上面函数参数、用法和含义可在ffmpeg官方文档中查阅，**注意不要选择默认最新的文档(因为可能又有变动)，选择4.1版本即可**，传送门：https://ffmpeg.org/doxygen/4.1/index.html。
