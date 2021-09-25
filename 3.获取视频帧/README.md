@@ -7,7 +7,7 @@
 #include "libavformat/avformat.h"
 #include <stdio.h>
 
-static void decoded(AVCodecContext *avcc, AVFrame *frame, AVPacket *packet);
+static void decode(AVCodecContext *avcc, AVFrame *frame, AVPacket *packet);
 
 int main()
 {
@@ -78,7 +78,7 @@ int main()
         if (packet->stream_index == video_index)
         {
           	// 解码数据
-            decoded(codec_context, frame, packet);
+            decode(codec_context, frame, packet);
         }
         // 释放引用的数据，重用frame和packet
         av_frame_unref(frame);
@@ -86,7 +86,7 @@ int main()
     }
 
     // 输出缓存的数据
-    decoded(codec_context, frame, NULL);
+    decode(codec_context, frame, NULL);
 
     // 内存释放
     av_frame_free(&frame);
@@ -96,7 +96,7 @@ int main()
     return 0;
 }
 
-static void decoded(AVCodecContext *avcc, AVFrame *frame, AVPacket *packet)
+static void decode(AVCodecContext *avcc, AVFrame *frame, AVPacket *packet)
 {
     // 送入进行解码
     int ret = avcodec_send_packet(avcc, packet);
@@ -183,7 +183,7 @@ while (av_read_frame(avformat_ctx, packet) >= 0)
     if (packet->stream_index == video_index)
     {
         // 解码数据
-        decoded(codec_context, frame, packet);
+        decode(codec_context, frame, packet);
     }
     // 释放引用的数据，重用frame和packet
     av_frame_unref(frame);
@@ -193,7 +193,7 @@ while (av_read_frame(avformat_ctx, packet) >= 0)
 
 8. 输出剩下的数据。
 
-   `decoded(codec_context, frame, NULL)`。传一个空`packet`过去。
+   `decode(codec_context, frame, NULL)`。传一个空`packet`过去。
 
 ## AVPacket结构体
 
